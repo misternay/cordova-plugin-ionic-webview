@@ -120,6 +120,8 @@
 
 @synthesize engineWebView = _engineWebView;
 
+NSTimer *timer;
+
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super init];
@@ -267,9 +269,7 @@
         [wkWebView.configuration.userContentController addScriptMessageHandler:(id < WKScriptMessageHandler >)self.viewController name:CDV_BRIDGE_NAME];
     }
 
-    //if (![settings cordovaBoolSettingForKey:@"KeyboardDisplayRequiresUserAction" defaultValue:NO]) {
     [self keyboardDisplayDoesNotRequireUserAction];
-    //}
 
     [self updateSettings:settings];
 
@@ -279,6 +279,16 @@
      addObserver:self
      selector:@selector(onAppWillEnterForeground:)
      name:UIApplicationWillEnterForegroundNotification object:nil];
+    
+    [[NSNotificationCenter defaultCenter]
+     addObserver:self
+     selector:@selector(keyboardWillHide)
+     name:UIKeyboardWillHideNotification object:nil];
+
+    [[NSNotificationCenter defaultCenter]
+     addObserver:self
+     selector:@selector(keyboardWillShow)
+     name:UIKeyboardWillShowNotification object:nil];
 
     NSLog(@"Using Ionic WKWebView");
 
@@ -289,9 +299,15 @@
 - (void) keyboardDisplayDoesNotRequireUserAction {
     Class class = NSClassFromString(@"WKContentView");
     NSOperatingSystemVersion iOS_11_3_0 = (NSOperatingSystemVersion){11, 3, 0};
+      NSOperatingSystemVersion iOS_12_2_0 = (NSOperatingSystemVersion){12, 2, 0};
+    char * methodSignature = "_startAssistingNode:userIsInteracting:blurPreviousNode:changingActivityState:userObject:";
+
+    if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion: iOS_12_2_0]) {
+        methodSignature = "_elementDidFocus:userIsInteracting:blurPreviousNode:changingActivityState:userObject:";
+    }
 
     if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion: iOS_11_3_0]) {
-        SEL selector = sel_getUid("_startAssistingNode:userIsInteracting:blurPreviousNode:changingActivityState:userObject:");
+        SEL selector = sel_getUid(methodSignature);
         Method method = class_getInstanceMethod(class, selector);
         IMP original = method_getImplementation(method);
         IMP override = imp_implementationWithBlock(^void(id me, void* arg0, BOOL arg1, BOOL arg2, BOOL arg3, id arg4) {
@@ -340,6 +356,31 @@ static void * KVOContext = &KVOContext;
         NSLog(@"%@", @"CDVWKWebViewEngine reloading!");
         [(WKWebView*)_engineWebView reload];
     }
+}
+
+
+-(void)keyboardWillHide
+{
+    if (@available(iOS 12.0, *)) {
+        timer = [NSTimer scheduledTimerWithTimeInterval:0 target:self selector:@selector(keyboardDisplacementFix) userInfo:nil repeats:false];
+        [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+    }
+}
+
+-(void)keyboardWillShow
+{
+    if (timer != nil) {
+        [timer invalidate];
+    }
+}
+
+-(void)keyboardDisplacementFix
+{
+    // https://stackoverflow.com/a/9637807/824966
+    [UIView animateWithDuration:.25 animations:^{
+        self.webView.scrollView.contentOffset = CGPointMake(0, 0);
+    }];
+
 }
 
 - (BOOL)shouldReloadWebView
@@ -636,7 +677,7 @@ static void * KVOContext = &KVOContext;
 
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
 {
-    [webView reload];
+        [webView reload];
 }
 
 - (BOOL)defaultResourcePolicyForURL:(NSURL*)url
@@ -648,7 +689,6 @@ static void * KVOContext = &KVOContext;
 
     return NO;
 }
-
 
 - (void) webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction*)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
 {
@@ -687,7 +727,6 @@ static void * KVOContext = &KVOContext;
             [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginHandleOpenURLNotification object:url]];
         }
     }
-
 
     if (shouldAllowRequest) {
         NSString *scheme = url.scheme;
@@ -728,4 +767,3 @@ static void * KVOContext = &KVOContext;
 }
 
 @end
-
